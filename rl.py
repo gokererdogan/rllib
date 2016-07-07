@@ -69,9 +69,9 @@ def evaluate_policy_dp(environment, agent, discount_factor, eps=1e-6):
     return q
 
 
-def calculate_optimal_q_dp(environment, action_space, discount_factor, eps=1e-6):
+def calculate_optimal_q_dp(environment, discount_factor, eps=1e-6):
     state_count = environment.state_count
-    action_count = len(action_space)
+    action_count = environment.action_count
 
     # randomly initialize
     q = np.random.rand(state_count, action_count) * 0.1
@@ -82,7 +82,7 @@ def calculate_optimal_q_dp(environment, action_space, discount_factor, eps=1e-6)
         for state_id in range(state_count):
             state = environment.state_space[state_id]
             for action_id in range(action_count):
-                action = action_space[action_id]
+                action = environment.action_space[action_id]
                 q_sa = 0.0
 
                 # get reward and next states

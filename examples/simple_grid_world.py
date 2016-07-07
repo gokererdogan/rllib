@@ -1,10 +1,46 @@
 import numpy as np
 
+
 from rllib.environment import Environment
 from rllib.agent import Agent
+from rllib.space import DiscreteStateSpace, DiscreteActionSpace
+from rllib.parameter_schedule import GreedyEpsilonLinearSchedule
 from rllib.q_learning import QLearningAgent
 from rllib.rl import calculate_optimal_q_dp
 from rllib.policy_gradient import PolicyGradientAgent
+
+
+class SimpleGridWorldStateSpace(DiscreteStateSpace):
+    def __init__(self):
+        states = []
+        for i in range(4):
+            for j in range(3):
+                states.append((i, j))
+
+        DiscreteStateSpace.__init__(self, states)
+
+    def is_goal_state(self, state):
+        if state in [(3, 1), (3, 2)]:
+            return True
+        return False
+
+    def get_reward(self, state):
+        if state == (3, 2):
+            return 1.0
+        elif state == (3, 1):
+            return -1.0
+        elif state == (1, 1):
+            return 0.0
+        else:
+            return -0.04
+
+    def get_initial_state(self):
+        return (0, 0)
+
+
+class SimpleGridWorldActionSpace(DiscreteActionSpace):
+    def __init__(self):
+        DiscreteActionSpace.__init__(self, actions=['L', 'R', 'U', 'D'])
 
 
 class SimpleGridWorldEnvironment(Environment):
@@ -12,15 +48,8 @@ class SimpleGridWorldEnvironment(Environment):
         """
         This is the example grid world discussed in Chapter 21 of Artificial Intelligence: A Modern Approach
         """
-        state_space = []
-        for i in range(4):
-            for j in range(3):
-                state_space.append((i, j))
-
-        Environment.__init__(self, state_space=state_space,
-                             action_space=['L', 'R', 'U', 'D'],
-                             initial_state=(0, 0), initial_reward=-0.04,
-                             goal_states=((3, 1), (3, 2)))
+        Environment.__init__(self, state_space=SimpleGridWorldStateSpace(),
+                             action_space=SimpleGridWorldActionSpace())
 
         self.action_steps = {'L': (-1, 0), 'R': (1, 0), 'U': (0, 1), 'D': (0, -1)}
         self.relative_actions = {('L', 'L'): 'D', ('L', 'R'): 'U', ('R', 'L'): 'U', ('R', 'R'): 'D',
@@ -35,14 +64,10 @@ class SimpleGridWorldEnvironment(Environment):
 
         step = self.action_steps[action]
         new_state = (self.current_state[0] + step[0], self.current_state[1] + step[1])
-        if new_state == (3, 2):
-            return new_state, 1.0
-        elif new_state == (3, 1):
-            return new_state, -1.0
-        elif self._state_out_of_bounds(new_state):
-            return self.current_state, -0.04
-        else:
-            return new_state, -0.04
+        if self._state_out_of_bounds(new_state):
+            new_state = self.current_state
+
+        return new_state
 
     def _state_out_of_bounds(self, state):
         if state[0] < 0 or state[0] >= self.x_width or state[1] < 0 or state[1] >= self.y_width or state == (1, 1):
@@ -62,14 +87,10 @@ class SimpleGridWorldEnvironment(Environment):
             state_probabilities.append(prob)
 
     def get_next_states(self, state, action):
-        if state == (1, 1):
-            return 0.0, [], np.array([])
-        elif state == (3, 2):
-            return 1.0, [], np.array([])
-        elif state == (3, 1):
-            return -1.0, [], np.array([])
+        if state in [(1, 1), (3, 2), (3, 1)]:
+            return self.state_space.get_reward(state), [], np.array([])
 
-        reward = -0.04
+        reward = self.state_space.get_reward(state)
         next_states = []
         state_probabilities = []
 
@@ -93,35 +114,48 @@ class SimpleGridWorldEnvironment(Environment):
 
 class SimpleGridWorldAgent(Agent):
     def __init__(self):
-        Agent.__init__(self, action_space=['L', 'R', 'U', 'D'])
+        Agent.__init__(self, action_space=SimpleGridWorldActionSpace())
 
-    def perceive(self, new_state, reward, reached_goal_state=False, episode_end=False):
+    def perceive(self, new_state, reward, available_actions, reached_goal_state=False, episode_end=False):
         return np.random.choice(self.action_space)
 
 
 if __name__ == "__main__":
     env = SimpleGridWorldEnvironment()
-    action_space = ['L', 'R', 'U', 'D']
 
-    """
-    q_opt = calculate_optimal_q_dp(env, action_space, discount_factor=1.0, eps=1e-9)
+    q_opt = calculate_optimal_q_dp(env, discount_factor=1.0, eps=1e-9)
     print q_opt
 
-    q_learner = QLearningAgent(env.state_space, action_space, discount_factor=1.0,
-                               greed_eps=0.1, learning_params={'LEARNING_RATE': 0.05})
+    epoch_count = 20
+    episodes_per_epoch = 2000
+    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=epoch_count*episodes_per_epoch,
+                                               decrease_period=episodes_per_epoch)
+    rewards = np.zeros(epoch_count)
 
-    for i in range(50000):
-        env.run(q_learner, np.inf)
+    """
+    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule, learning_rate=0.05)
+    for e in range(epoch_count):
+        for i in range(episodes_per_epoch):
+            s, a, r = env.run(q_learner, np.inf)
+            rewards[e] += np.sum(r)
+        rewards[e] /= episodes_per_epoch
+        print("Epoch {0:d}| Avg. reward per episode: {1:f}".format(e+1, rewards[e]))
+
+    q_learner.set_learning_mode(False)
+    reward = 0.0
+    for i in range(1000):
+        s, a, r = env.run(q_learner, np.inf)
+        reward += np.sum(r)
+    print("Avg. reward with greedy policy: {0:f}".format(reward/1000))
 
     print q_learner.q
     """
 
-    pg_learner = PolicyGradientAgent(env.state_space, action_space, learning_rate=0.05,
-                                     update_freq=1, optimizer='gd')
+    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.05, greed_eps=eps_schedule,
+                                     update_freq=1, apply_baseline=True, clip_gradients=True,
+                                     optimizer='gd')
 
-    epoch_count = 20
-    episodes_per_epoch = 1000
-    rewards = np.zeros(epoch_count)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
             s, a, r = env.run(pg_learner, np.inf)
@@ -129,3 +163,12 @@ if __name__ == "__main__":
         rewards[e] /= episodes_per_epoch
         print("Epoch {0:d}| Avg. reward per episode: {1:f}".format(e+1, rewards[e]))
 
+    pg_learner.set_learning_mode(False)
+    reward = 0.0
+    for i in range(1000):
+        s, a, r = env.run(pg_learner, np.inf)
+        reward += np.sum(r)
+    print("Avg. reward with learned policy: {0:f}".format(reward/1000))
+
+    for s in env.state_space:
+        print pg_learner.forward(env.state_space.to_vector(s))
