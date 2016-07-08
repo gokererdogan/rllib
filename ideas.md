@@ -16,3 +16,6 @@ should be instances of these.
 Agent classes.
 - picking a random action should be done by ActionSpace, not by Agent
 classes
+- who should reset episodes_experienced in Agent? and when should it be
+reset? We need to make sure it is reset before we retrain if a parameter
+(like epsilon of greedy) depends on episoded experienced.

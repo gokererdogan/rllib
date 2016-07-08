@@ -4,6 +4,7 @@ from rllib.space import StateSpace, ActionSpace
 from rllib.environment import GameEnvironment
 from rllib.environment import PLAYER1, PLAYER2
 from rllib.agent import Agent
+from rllib.parameter_schedule import GreedyEpsilonLinearSchedule
 from rllib.q_learning import QLearningAgent
 from rllib.policy_gradient import PolicyGradientAgent
 
@@ -274,13 +275,14 @@ def pit_against_q_learner(player, epoch_count=20, games_per_epoch=2000):
     return rewards, q_dist, q_norm
 
 
-def pit_against_pg_learner(player, epoch_count=20, games_per_epoch=2000):
+def pit_against_pg_learner(players, epoch_count=20, games_per_epoch=2000):
     wa_norm = np.zeros(epoch_count)
     wa_dist = np.zeros(epoch_count)
     rewards = np.zeros(epoch_count)
     old_wa = pg_learner.wa.get_value().copy()
     for e in range(epoch_count):
         for i in range(games_per_epoch):
+            player = np.random.choice(players)
             if np.random.rand() > 0.5:
                 s, a1, r1, a2, r2 = env.run([pg_learner, player], np.inf)
             else:
@@ -298,11 +300,17 @@ if __name__ == "__main__":
 
     env = TicTacToe()
 
-    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
-                               greed_eps=0.25, learning_rate=0.1)
+    epoch_count = 20
+    games_per_epoch = 2000
 
-    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.005,
-                                     update_freq=1, apply_baseline=False, clip_gradients=False,
+    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.0, no_episodes=epoch_count*games_per_epoch,
+                                               decrease_period=1000)
+
+    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule, learning_rate=0.1)
+
+    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.1, greed_eps=eps_schedule,
+                                     update_freq=10, apply_baseline=True, clip_gradients=True,
                                      optimizer='gd')
 
     ps1 = SearchOneMoveAheadPlayer(env.action_space, strength=0.25)
@@ -323,7 +331,7 @@ if __name__ == "__main__":
     s, a1, r1, a2, r2 = env.run([ph, ps4], np.inf, True)
     """
 
-    r, pgd, pgn = pit_against_pg_learner(ps3, epoch_count=20, games_per_epoch=2000)
+    r, pgd, pgn = pit_against_pg_learner([pr, ps1, ps2, ps3, ps4], epoch_count=100, games_per_epoch=2000)
 
     pg_learner.set_learning_mode(False)
-    r, _, _ = pit_against_pg_learner(ps3, epoch_count=1, games_per_epoch=2000)
+    r, _, _ = pit_against_pg_learner(ps4, epoch_count=1, games_per_epoch=2000)

@@ -161,13 +161,13 @@ class PolicyGradientAgent(Agent):
             return None
 
         # act
+        available_action_ids = [self.action_space.index(a) for a in available_actions]
         if not self.learning_on or np.random.rand() > self.greed_eps.get_value(self):
             probs = self._get_action_probs(x)
-            available_action_ids = [self.action_space.index(a) for a in available_actions]
             available_probs = probs[available_action_ids] / np.sum(probs[available_action_ids])
             a_id = np.random.choice(available_action_ids, p=available_probs)
         else:
-            a_id = np.random.choice(len(available_actions))
+            a_id = np.random.choice(available_action_ids)
 
         if self.learning_on:
             # accumulate gradients
