@@ -60,6 +60,8 @@ class PolicyGradientAgent(Agent):
 
         # store gradient magnitudes (mainly for debugging)
         self.grad_magnitudes = [[] for _ in self.grads]
+        # store gradients (for debugging)
+        self.applied_grads = [[] for _ in self.grads]
 
         self.dwa, self.dba = T.grad(self.logp, [self.wa, self.ba])
 
@@ -112,11 +114,6 @@ class PolicyGradientAgent(Agent):
 
         self.update_params = theano.function([], None, updates=gradient_updates)
 
-    def reset(self):
-        # reset is called by Environment at the start of each episode
-        self.zero_after_episode_end()
-        self.zero_after_update_params()
-
     def zero_after_update_params(self):
         self.total_dwa.set_value(np.zeros((self.input_dim, self.output_dim), dtype=theano.config.floatX))
         self.total_dba.set_value(np.zeros(self.output_dim, dtype=theano.config.floatX))
@@ -129,7 +126,8 @@ class PolicyGradientAgent(Agent):
 
     def _record_grad_magnitudes(self):
         for i, g in enumerate(self.grads):
-            self.grad_magnitudes[i].append(np.sum(np.square(g.get_value())))
+            self.grad_magnitudes[i].append(np.sum(np.square(g.get_value() / self.update_freq)))
+            self.applied_grads[i].append(g.get_value() / self.update_freq)
 
     def _get_action_probs(self, state):
         return self.forward(np.cast[theano.config.floatX](state)).ravel()
@@ -148,7 +146,7 @@ class PolicyGradientAgent(Agent):
                 self.update_end_episode()
                 self.zero_after_episode_end()
 
-                if int(self.episodes_experienced_t.get_value()) % self.update_freq == 0:
+                if self.episodes_experienced % self.update_freq == 0:
                     if self.clip_gradients:
                         self.update_clip_gradients()
 

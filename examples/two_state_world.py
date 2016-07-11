@@ -101,13 +101,12 @@ class TwoStateInfiniteWorldEnvironment(Environment):
 if __name__ == "__main__":
     eps_schedule = GreedyEpsilonConstantSchedule(eps=0.2)
 
-    """
     # finite case
     env = TwoStateFiniteWorldEnvironment()
     agent = TwoStateWorldAgent()
 
     pg_learner = PolicyGradientAgent(env.state_space, agent.action_space, learning_rate=0.1, greed_eps=eps_schedule,
-                                     update_freq=1, optimizer='gd')
+                                     update_freq=100, optimizer='gd')
 
     for i in range(10000):
         progress_bar(i+1, max=10000, update_freq=100)
@@ -117,6 +116,7 @@ if __name__ == "__main__":
     print pg_learner.forward([0., 1.])
     print
 
+    """
     # calculate q for a given policy
     # expected q: [[0.4, 0.8], [1.0, 1.0]]
     q_mc = evaluate_policy_monte_carlo(env, agent, episode_count=10000, episode_length=np.inf, discount_factor=1.0)
@@ -141,13 +141,11 @@ if __name__ == "__main__":
         env.run(q_learner, episode_length=200)
     print q_learner.q
     print
-    """
 
     # infinite case (discount factor has to be < 1.0)
     env = TwoStateInfiniteWorldEnvironment()
     agent = TwoStateWorldAgent()
 
-    """
     # calculate q for a given policy
     # expected q: [[2.86, 3.94], [4.06, 5.14]]
     q_mc = evaluate_policy_monte_carlo(env, agent, episode_count=5000, episode_length=200, discount_factor=0.9)
@@ -172,7 +170,6 @@ if __name__ == "__main__":
         env.run(q_learner, episode_length=100)
     print q_learner.q
     print
-    """
 
     # policy gradient
     # note that applying a reward baseline is important for learning in this case
@@ -188,3 +185,4 @@ if __name__ == "__main__":
         print pg_learner.grad_magnitudes[0][-1]
         print pg_learner.grad_magnitudes[1][-1]
         print
+    """

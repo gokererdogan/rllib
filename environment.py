@@ -139,8 +139,10 @@ class GameEnvironment(Environment):
 
             e += 1
             if e >= episode_length or self.state_space.is_goal_state(self.current_state):
+                states.append(self.current_state)
                 # let both players (who does not know the game ended) perceive one last time.
                 for p in [PLAYER1, PLAYER2]:
+                    self.turn = p
                     _ = agents[p].perceive(self._current_state_as_first_player(),
                                            self.current_reward[p],
                                            self.get_available_actions(),

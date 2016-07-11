@@ -22,7 +22,7 @@ class TicTacToeStateSpace(StateSpace):
     def index(self, state):
         id = 0
         for i, m in enumerate(state):
-            id += (m+1)*(3**i)
+            id += int(m+1)*(3**i)
 
         return id
 
@@ -33,7 +33,11 @@ class TicTacToeStateSpace(StateSpace):
 
     def get_reward(self, state):
         # return a tuple with rewards for player1 and player2 respectively
-        if self._check_win(state, player=PLAYER1):
+        if np.allclose(state, 0.0):  # first player made an illegal move
+            return -1.0, 0.0
+        elif np.allclose(state, 1.0):  # second player made an illegal move
+            return 0.0, -1.0
+        elif self._check_win(state, player=PLAYER1):
             return 1.0, -1.0
         elif self._check_win(state, player=PLAYER2):
             return -1.0, 1.0
@@ -41,10 +45,14 @@ class TicTacToeStateSpace(StateSpace):
             return 0.0, 0.0
 
     def is_goal_state(self, state):
+        if np.allclose(state, 0.0) or np.allclose(state, 1.0):
+            return True
+
         if self._check_win(state, player=PLAYER1) or self._check_win(state, player=PLAYER2):
             return True
         if self._check_draw(state):
             return True
+
         return False
 
     def _check_win(self, state, player):
@@ -69,18 +77,25 @@ class TicTacToeStateSpace(StateSpace):
         return False
 
     def to_vector(self, state):
+        x = state.copy()
+        x[np.isclose(state, -1)] = 0
+        x[np.isclose(state, 0)] = 1
+        x[np.isclose(state, 1)] = -1
         return state
 
     def to_string(self, state):
         print "==="
         c = ['-', 'x', 'o']
-        board_str = "\n".join(["".join([c[i+1] for i in state[(row*3):((row+1)*3)]]) for row in range(3)])
-        if self._check_win(state, PLAYER1):
-            board_str += "\nGame finished. Winner is PLAYER1"
+        board_str = "\n".join(["".join([c[int(i+1)] for i in state[(row*3):((row+1)*3)]]) for row in range(3)])
+
+        if np.allclose(state, 0.0) or np.allclose(state, 1.0):
+            board_str += "\nGame finished"
+        elif self._check_win(state, PLAYER1):
+            board_str += ". Winner is PLAYER1"
         elif self._check_win(state, PLAYER2):
-            board_str += "\nGame finished. Winner is PLAYER2"
+            board_str += ". Winner is PLAYER2"
         elif self._check_draw(state):
-            board_str += "\nGame finished with DRAW."
+            board_str += " with DRAW."
 
         return board_str
 
@@ -115,14 +130,6 @@ class TicTacToe(GameEnvironment):
         GameEnvironment.__init__(self, game_state_space=state_space,
                                  action_space=action_space)
 
-    def print_game(self):
-        print "==="
-        c = ['-', 'x', 'o']
-        board_str = "\n".join(["".join([c[i] for i in self.current_state[(row*3):((row+1)*3)]]) for row in range(3)])
-        print board_str
-        if not self.state_space.is_goal_state(self.current_state):
-            "Game finished."
-
     def _current_state_as_first_player(self):
         if self.turn == PLAYER1:
             return self.current_state
@@ -139,14 +146,18 @@ class TicTacToe(GameEnvironment):
 
         m_id = move.nonzero()[0][0]
         if self.current_state[m_id] != EMPTY:
-            raise ValueError("Position already played.")
+            if self.turn == PLAYER1:
+                new_state = np.zeros(9)
+            elif self.turn == PLAYER2:
+                new_state = np.ones(9)
+        else:
+            new_state[m_id] = self.turn
 
-        new_state[m_id] = self.turn
         return new_state
 
     def get_available_actions(self):
-        a_ids = np.nonzero(self.current_state == EMPTY)[0]
-        return [self.action_space[a_id] for a_id in a_ids]
+        # we allow players to make illegal moves (and punish them for it).
+        return [self.action_space[a_id] for a_id in range(9)]
 
 
 class RandomPlayer(Agent):
@@ -208,36 +219,38 @@ class SearchOneMoveAheadPlayer(Agent):
         if reached_goal_state:
             return None
 
-        available_action_ids = [self.action_space.index(a) for a in available_actions]
+        available_action_ids = np.nonzero(state == EMPTY)[0]
 
+        selected_move = np.zeros(9, dtype=np.int8)
         if np.random.rand() > self.strength:
-            a_id = np.random.choice(len(available_actions))
-            selected_move = available_actions[a_id]
+            a_id = np.random.choice(available_action_ids)
         else:
-            found_moves = []
+            found_moves_to_win = []
+            found_moves_not_to_lose = []
             # moves to win
-            found_moves.extend(self._find_vertical_moves(state))
-            found_moves.extend(self._find_horizontal_moves(state))
-            found_moves.extend(self._find_diagonal_moves(state))
+            found_moves_to_win.extend(self._find_vertical_moves(state))
+            found_moves_to_win.extend(self._find_horizontal_moves(state))
+            found_moves_to_win.extend(self._find_diagonal_moves(state))
             # moves not to lose
             her_state = state.copy()
             her_state[state == 0] = 1
             her_state[state == 1] = 0
-            found_moves.extend(self._find_vertical_moves(her_state))
-            found_moves.extend(self._find_horizontal_moves(her_state))
-            found_moves.extend(self._find_diagonal_moves(her_state))
+            found_moves_not_to_lose.extend(self._find_vertical_moves(her_state))
+            found_moves_not_to_lose.extend(self._find_horizontal_moves(her_state))
+            found_moves_not_to_lose.extend(self._find_diagonal_moves(her_state))
 
             # remove non-empty positions
-            found_moves = [m for m in found_moves if m in available_action_ids]
+            found_moves_to_win = [m for m in found_moves_to_win if m in available_action_ids]
+            found_moves_not_to_lose = [m for m in found_moves_not_to_lose if m in available_action_ids]
 
-            if len(found_moves) > 0:
-                m = np.random.choice(found_moves)
-                selected_move = np.zeros(9, dtype=np.int8)
-                selected_move[m] = 1
+            if len(found_moves_to_win) > 0:
+                a_id = np.random.choice(found_moves_to_win)
+            elif len(found_moves_not_to_lose) > 0:
+                a_id = np.random.choice(found_moves_not_to_lose)
             else:
-                a_id = np.random.choice(len(available_actions))
-                selected_move = available_actions[a_id]
+                a_id = np.random.choice(available_action_ids)
 
+        selected_move[a_id] = 1
         return selected_move
 
 
@@ -254,18 +267,19 @@ class HumanPlayer(Agent):
         return move
 
 
-def pit_against_q_learner(player, epoch_count=20, games_per_epoch=2000):
+def pit_against_q_learner(players, epoch_count=20, games_per_epoch=2000):
     q_norm = np.zeros(epoch_count)
     q_dist = np.zeros(epoch_count)
     rewards = np.zeros(epoch_count)
     old_q = q_learner.q.copy()
     for e in range(epoch_count):
         for i in range(games_per_epoch):
+            player = np.random.choice(players)
             if np.random.rand() > 0.5:
                 s, a1, r1, a2, r2 = env.run([q_learner, player], np.inf)
             else:
                 s, a2, r2, a1, r1 = env.run([player, q_learner], np.inf)
-            rewards[e] += np.sum(r1)
+            rewards[e] += (np.sum(r1) / (len(a1) - 1))
         rewards[e] /= games_per_epoch
         q_dist[e] = np.sum(np.square(q_learner.q - old_q))
         q_norm[e] = np.sum(np.square(q_learner.q))
@@ -284,10 +298,10 @@ def pit_against_pg_learner(players, epoch_count=20, games_per_epoch=2000):
         for i in range(games_per_epoch):
             player = np.random.choice(players)
             if np.random.rand() > 0.5:
-                s, a1, r1, a2, r2 = env.run([pg_learner, player], np.inf)
+                s, a1, r1, a2, r2 = env.run([pg_learner, player], np.inf, False)
             else:
-                s, a2, r2, a1, r1 = env.run([player, pg_learner], np.inf)
-            rewards[e] += np.sum(r1)
+                s, a2, r2, a1, r1 = env.run([player, pg_learner], np.inf, False)
+            rewards[e] += (np.sum(r1) / (len(a1) - 1))
         rewards[e] /= games_per_epoch
         wa_dist[e] = np.sum(np.square(pg_learner.wa.get_value() - old_wa))
         wa_norm[e] = np.sum(np.square(pg_learner.wa.get_value()))
@@ -300,18 +314,8 @@ if __name__ == "__main__":
 
     env = TicTacToe()
 
-    epoch_count = 20
+    epoch_count = 100
     games_per_epoch = 2000
-
-    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.0, no_episodes=epoch_count*games_per_epoch,
-                                               decrease_period=1000)
-
-    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule, learning_rate=0.1)
-
-    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.1, greed_eps=eps_schedule,
-                                     update_freq=10, apply_baseline=True, clip_gradients=True,
-                                     optimizer='gd')
 
     ps1 = SearchOneMoveAheadPlayer(env.action_space, strength=0.25)
     ps2 = SearchOneMoveAheadPlayer(env.action_space, strength=0.50)
@@ -320,18 +324,27 @@ if __name__ == "__main__":
     pr = RandomPlayer()
     ph = HumanPlayer()
 
+    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=0.2, end_eps=0.0, no_episodes=epoch_count*games_per_epoch,
+                                               decrease_period=1000)
+
     """
-    r, qd, qn = pit_against_q_learner(pr, epoch_count=20, games_per_epoch=2000)
+    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule, learning_rate=0.1)
+
+    r, qd, qn = pit_against_q_learner([pr, ps1, ps2, ps3, ps4], epoch_count=epoch_count, games_per_epoch=games_per_epoch)
 
     q_learner.set_learning_mode(False)
-    r, _, _ = pit_against_q_learner(pr, epoch_count=1, games_per_epoch=2000)
+    r, _, _ = pit_against_q_learner([ps4], epoch_count=1, games_per_epoch=2000)
 
     print q_learner.q[0]
-
-    s, a1, r1, a2, r2 = env.run([ph, ps4], np.inf, True)
     """
 
-    r, pgd, pgn = pit_against_pg_learner([pr, ps1, ps2, ps3, ps4], epoch_count=100, games_per_epoch=2000)
+    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.1, greed_eps=eps_schedule,
+                                     update_freq=100, apply_baseline=False, clip_gradients=False,
+                                     optimizer='gd')
+
+    r, pgd, pgn = pit_against_pg_learner([pr, ps1, ps2, ps3, ps4], epoch_count=epoch_count,
+                                         games_per_epoch=games_per_epoch)
 
     pg_learner.set_learning_mode(False)
-    r, _, _ = pit_against_pg_learner(ps4, epoch_count=1, games_per_epoch=2000)
+    r, _, _ = pit_against_pg_learner([ps4], epoch_count=1, games_per_epoch=2000)
