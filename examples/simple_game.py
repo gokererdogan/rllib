@@ -5,7 +5,7 @@ from rllib.environment import GameEnvironment
 from rllib.environment import PLAYER1, PLAYER2
 from rllib.agent import Agent
 from rllib.parameter_schedule import GreedyEpsilonConstantSchedule
-from rllib.q_learning import QLearningAgent
+from rllib.q_learning import QLearningAgent, QTableLookup, QNeuralNetwork
 from rllib.policy_gradient import PolicyGradientAgent
 
 
@@ -34,11 +34,8 @@ class SimpleGameStateSpace(DiscreteStateSpace):
         return str(state)
 
     def to_vector(self, state):
-        x = np.zeros(2)
-        if state == 0:
-            x[0] = 1.0
-        elif state == 1:
-            x[1] = 1.0
+        x = np.zeros(4)
+        x[state] = 1.0
 
         return x
 
@@ -62,7 +59,16 @@ class SimpleGame(GameEnvironment):
                                  action_space=action_space)
 
     def _current_state_as_first_player(self):
-        return self.current_state
+        if self.turn == PLAYER1:
+            return self.current_state
+        else:
+            if self.current_state in (0, 1):
+                return self.current_state
+            else:
+                if self.current_state == 2:
+                    return 3
+                else:
+                    return 2
 
     def _advance(self, move):
         if self.current_state == 0:
@@ -108,10 +114,7 @@ class HumanPlayer(Agent):
 
 
 def pit_against_q_learner(players, epoch_count=20, games_per_epoch=2000):
-    q_norm = np.zeros(epoch_count)
-    q_dist = np.zeros(epoch_count)
     rewards = np.zeros(epoch_count)
-    old_q = q_learner.q.copy()
     for e in range(epoch_count):
         for i in range(games_per_epoch):
             player = np.random.choice(players)
@@ -121,12 +124,8 @@ def pit_against_q_learner(players, epoch_count=20, games_per_epoch=2000):
                 s, a2, r2, a1, r1 = env.run([player, q_learner], np.inf)
             rewards[e] += (np.sum(r1) / (len(a1) - 1))
         rewards[e] /= games_per_epoch
-        q_dist[e] = np.sum(np.square(q_learner.q - old_q))
-        q_norm[e] = np.sum(np.square(q_learner.q))
-        old_q = q_learner.q.copy()
-        print("Epoch {0:d}| Avg. reward per game: {1:f}, change in Q table: {2:f}, "
-              "Q table norm: {3:f}".format(e+1, rewards[e], q_dist[e], q_norm[e]))
-    return rewards, q_dist, q_norm
+        print("Epoch {0:d}| Avg. reward per game: {1:f}".format(e+1, rewards[e]))
+    return rewards
 
 
 def pit_against_pg_learner(players, epoch_count=20, games_per_epoch=2000):
@@ -154,28 +153,32 @@ if __name__ == "__main__":
 
     env = SimpleGame()
 
-    epoch_count = 50
+    epoch_count = 10
     games_per_epoch = 1000
 
     pr = RandomPlayer()
     ph = HumanPlayer()
 
-    eps_schedule = GreedyEpsilonConstantSchedule(eps=0.0)
+    eps_schedule = GreedyEpsilonConstantSchedule(eps=0.2)
+
+    # q_function = QTableLookup(env.state_space, env.action_space, learning_rate=0.1)
+    q_function = QNeuralNetwork([], env.state_space, env.action_space, learning_params={'LEARNING_RATE': 0.001})
+    q_learner = QLearningAgent(q_function, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule)
+
+    r = pit_against_q_learner([pr], epoch_count=epoch_count, games_per_epoch=games_per_epoch)
+
+    print q_function.get_q(env.state_space[0])
+    print q_function.get_q(env.state_space[1])
+    print q_function.get_q(env.state_space[2])
+    print q_function.get_q(env.state_space[3])
 
     """
-    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule, learning_rate=0.1)
-
-    r, qd, qn = pit_against_q_learner([pr], epoch_count=epoch_count, games_per_epoch=games_per_epoch)
-
-    print q_learner.q
-
-    """
-
     pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.1, greed_eps=eps_schedule,
                                      update_freq=100, apply_baseline=False, clip_gradients=False,
                                      optimizer='gd')
 
     r, pgd, pgn = pit_against_pg_learner([pr], epoch_count=epoch_count,
                                          games_per_epoch=games_per_epoch)
+    """
 

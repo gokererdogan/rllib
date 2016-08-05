@@ -5,7 +5,7 @@ from rllib.environment import Environment
 from rllib.agent import Agent
 from rllib.space import DiscreteStateSpace, DiscreteActionSpace
 from rllib.parameter_schedule import GreedyEpsilonLinearSchedule
-from rllib.q_learning import QLearningAgent
+from rllib.q_learning import QLearningAgent, QTableLookup, QNeuralNetwork
 from rllib.rl import calculate_optimal_q_dp
 from rllib.policy_gradient import PolicyGradientAgent
 
@@ -132,9 +132,10 @@ if __name__ == "__main__":
                                                decrease_period=episodes_per_epoch)
     rewards = np.zeros(epoch_count)
 
-    """
-    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule, learning_rate=0.05)
+    # q_function = QTableLookup(env.state_space, env.action_space, learning_rate=0.05)
+    q_function = QNeuralNetwork([], env.state_space, env.action_space, learning_params={'LEARNING_RATE': 0.01})
+    q_learner = QLearningAgent(q_function, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
             s, a, r = env.run(q_learner, np.inf)
@@ -149,9 +150,10 @@ if __name__ == "__main__":
         reward += np.sum(r)
     print("Avg. reward with greedy policy: {0:f}".format(reward/1000))
 
-    print q_learner.q
-    """
+    for state in env.state_space:
+        print q_function.get_q(state)
 
+    """
     pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.05, greed_eps=eps_schedule,
                                      update_freq=1, apply_baseline=True, clip_gradients=True,
                                      optimizer='gd')
@@ -172,3 +174,4 @@ if __name__ == "__main__":
 
     for s in env.state_space:
         print pg_learner.forward(env.state_space.to_vector(s))
+    """

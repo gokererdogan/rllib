@@ -29,6 +29,10 @@ class GreedyEpsilonLinearSchedule(ParameterSchedule):
 
     def get_value(self, agent):
         i = int(np.floor(float(agent.episodes_experienced) / self.decrease_period))
+        # if we are out of bounds (past the last episode), return the last value
+        if i >= len(self.schedule):
+            return self.schedule[-1]
+
         return self.schedule[i]
 
 

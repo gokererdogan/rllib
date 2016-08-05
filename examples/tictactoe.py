@@ -5,7 +5,7 @@ from rllib.environment import GameEnvironment
 from rllib.environment import PLAYER1, PLAYER2
 from rllib.agent import Agent
 from rllib.parameter_schedule import GreedyEpsilonLinearSchedule
-from rllib.q_learning import QLearningAgent
+from rllib.q_learning import QLearningAgent, QTableLookup, QNeuralNetwork
 from rllib.policy_gradient import PolicyGradientAgent
 
 EMPTY = -1
@@ -268,10 +268,7 @@ class HumanPlayer(Agent):
 
 
 def pit_against_q_learner(players, epoch_count=20, games_per_epoch=2000):
-    q_norm = np.zeros(epoch_count)
-    q_dist = np.zeros(epoch_count)
     rewards = np.zeros(epoch_count)
-    old_q = q_learner.q.copy()
     for e in range(epoch_count):
         for i in range(games_per_epoch):
             player = np.random.choice(players)
@@ -281,12 +278,8 @@ def pit_against_q_learner(players, epoch_count=20, games_per_epoch=2000):
                 s, a2, r2, a1, r1 = env.run([player, q_learner], np.inf)
             rewards[e] += (np.sum(r1) / (len(a1) - 1))
         rewards[e] /= games_per_epoch
-        q_dist[e] = np.sum(np.square(q_learner.q - old_q))
-        q_norm[e] = np.sum(np.square(q_learner.q))
-        old_q = q_learner.q.copy()
-        print("Epoch {0:d}| Avg. reward per game: {1:f}, change in Q table: {2:f}, "
-              "Q table norm: {3:f}".format(e+1, rewards[e], q_dist[e], q_norm[e]))
-    return rewards, q_dist, q_norm
+        print("Epoch {0:d}| Avg. reward per game: {1:f}".format(e+1, rewards[e]))
+    return rewards
 
 
 def pit_against_pg_learner(players, epoch_count=20, games_per_epoch=2000):
@@ -314,7 +307,7 @@ if __name__ == "__main__":
 
     env = TicTacToe()
 
-    epoch_count = 100
+    epoch_count = 400
     games_per_epoch = 2000
 
     ps1 = SearchOneMoveAheadPlayer(env.action_space, strength=0.25)
@@ -324,21 +317,22 @@ if __name__ == "__main__":
     pr = RandomPlayer()
     ph = HumanPlayer()
 
-    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=0.2, end_eps=0.0, no_episodes=epoch_count*games_per_epoch,
+    eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=(epoch_count-50)*games_per_epoch,
                                                decrease_period=1000)
 
-    """
-    q_learner = QLearningAgent(env.state_space, env.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule, learning_rate=0.1)
+    # q_function = QTableLookup(env.state_space, env.action_space, learning_rate=0.1)
+    q_function = QNeuralNetwork([20], env.state_space, env.action_space, learning_params={'LEARNING_RATE': 0.1})
+    q_learner = QLearningAgent(q_function, env.action_space, discount_factor=1.0,
+                               greed_eps=eps_schedule)
 
-    r, qd, qn = pit_against_q_learner([pr, ps1, ps2, ps3, ps4], epoch_count=epoch_count, games_per_epoch=games_per_epoch)
+    r = pit_against_q_learner([pr, ps1, ps2, ps3, ps4], epoch_count=epoch_count, games_per_epoch=games_per_epoch)
 
     q_learner.set_learning_mode(False)
-    r, _, _ = pit_against_q_learner([ps4], epoch_count=1, games_per_epoch=2000)
+    r = pit_against_q_learner([ps4], epoch_count=1, games_per_epoch=2000)
 
-    print q_learner.q[0]
+    print q_function.get_q(env.state_space.get_initial_state())
+
     """
-
     pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.1, greed_eps=eps_schedule,
                                      update_freq=100, apply_baseline=False, clip_gradients=False,
                                      optimizer='gd')
@@ -348,3 +342,4 @@ if __name__ == "__main__":
 
     pg_learner.set_learning_mode(False)
     r, _, _ = pit_against_pg_learner([ps4], epoch_count=1, games_per_epoch=2000)
+    """
