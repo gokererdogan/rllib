@@ -1,23 +1,23 @@
 import numpy as np
-
+from lasagne.updates import sgd
 
 from rllib.environment import Environment
 from rllib.agent import Agent
-from rllib.space import DiscreteStateSpace, DiscreteActionSpace
+from rllib.space import FiniteStateSpace, FiniteActionSpace
 from rllib.parameter_schedule import GreedyEpsilonLinearSchedule
 from rllib.q_learning import QLearningAgent, QTableLookup, QNeuralNetwork
 from rllib.rl import calculate_optimal_q_dp
-from rllib.policy_gradient import PolicyGradientAgent
+from rllib.policy_gradient import PolicyGradientAgent, PolicyNeuralNetworkMultinomial
 
 
-class SimpleGridWorldStateSpace(DiscreteStateSpace):
+class SimpleGridWorldStateSpace(FiniteStateSpace):
     def __init__(self):
         states = []
         for i in range(4):
             for j in range(3):
                 states.append((i, j))
 
-        DiscreteStateSpace.__init__(self, states)
+        FiniteStateSpace.__init__(self, states)
 
     def is_goal_state(self, state):
         if state in [(3, 1), (3, 2)]:
@@ -35,12 +35,12 @@ class SimpleGridWorldStateSpace(DiscreteStateSpace):
             return -0.04
 
     def get_initial_state(self):
-        return (0, 0)
+        return 0, 0
 
 
-class SimpleGridWorldActionSpace(DiscreteActionSpace):
+class SimpleGridWorldActionSpace(FiniteActionSpace):
     def __init__(self):
-        DiscreteActionSpace.__init__(self, actions=['L', 'R', 'U', 'D'])
+        FiniteActionSpace.__init__(self, actions=['L', 'R', 'U', 'D'])
 
 
 class SimpleGridWorldEnvironment(Environment):
@@ -48,8 +48,7 @@ class SimpleGridWorldEnvironment(Environment):
         """
         This is the example grid world discussed in Chapter 21 of Artificial Intelligence: A Modern Approach
         """
-        Environment.__init__(self, state_space=SimpleGridWorldStateSpace(),
-                             action_space=SimpleGridWorldActionSpace())
+        Environment.__init__(self, state_space=SimpleGridWorldStateSpace())
 
         self.action_steps = {'L': (-1, 0), 'R': (1, 0), 'U': (0, 1), 'D': (0, -1)}
         self.relative_actions = {('L', 'L'): 'D', ('L', 'R'): 'U', ('R', 'L'): 'U', ('R', 'R'): 'D',
@@ -116,26 +115,30 @@ class SimpleGridWorldAgent(Agent):
     def __init__(self):
         Agent.__init__(self, action_space=SimpleGridWorldActionSpace())
 
+    def reset(self):
+        pass
+
     def perceive(self, new_state, reward, available_actions, reached_goal_state=False, episode_end=False):
         return np.random.choice(self.action_space)
 
 
 if __name__ == "__main__":
     env = SimpleGridWorldEnvironment()
+    action_space = SimpleGridWorldActionSpace()
 
-    q_opt = calculate_optimal_q_dp(env, discount_factor=1.0, eps=1e-9)
+    q_opt = calculate_optimal_q_dp(env, action_space, discount_factor=1.0, eps=1e-9)
     print q_opt
 
-    epoch_count = 20
+    epoch_count = 50
     episodes_per_epoch = 2000
     eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=epoch_count*episodes_per_epoch,
                                                decrease_period=episodes_per_epoch)
     rewards = np.zeros(epoch_count)
 
-    # q_function = QTableLookup(env.state_space, env.action_space, learning_rate=0.05)
-    q_function = QNeuralNetwork([], env.state_space, env.action_space, learning_params={'LEARNING_RATE': 0.01})
-    q_learner = QLearningAgent(q_function, env.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule)
+    """
+    # q_function = QTableLookup(env.state_space, action_space, learning_rate=0.05)
+    q_function = QNeuralNetwork([], env.state_space, action_space, learning_rate=0.01)
+    q_learner = QLearningAgent(q_function, discount_factor=1.0, greed_eps=eps_schedule)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
             s, a, r = env.run(q_learner, np.inf)
@@ -154,10 +157,9 @@ if __name__ == "__main__":
         print q_function.get_q(state)
 
     """
-    pg_learner = PolicyGradientAgent(env.state_space, env.action_space, learning_rate=0.05, greed_eps=eps_schedule,
-                                     update_freq=1, apply_baseline=True, clip_gradients=True,
-                                     optimizer='gd')
-
+    policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.01,
+                                                     optimizer=sgd)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=400)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
             s, a, r = env.run(pg_learner, np.inf)
@@ -173,5 +175,4 @@ if __name__ == "__main__":
     print("Avg. reward with learned policy: {0:f}".format(reward/1000))
 
     for s in env.state_space:
-        print pg_learner.forward(env.state_space.to_vector(s))
-    """
+        print policy_function._forward(env.state_space.to_vector(s)[np.newaxis, :])

@@ -18,4 +18,11 @@ Agent classes.
 classes
 - who should reset episodes_experienced in Agent? and when should it be
 reset? We need to make sure it is reset before we retrain if a parameter
-(like epsilon of greedy) depends on episoded experienced.
+(like epsilon of greedy) depends on episodes experienced.
+- do we need a separate GameEnvironment class? We can modify Environment
+such that any number of agents can run in an environment. Then we don't
+need GameEnvironment.
+    - How each agent is rewarded becomes tricky. Need to think about 
+    that.
+- GameEnvironment is not tested. Do it. Game examples should be tested
+too.

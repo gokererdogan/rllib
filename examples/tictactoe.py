@@ -306,23 +306,24 @@ def pit_against_pg_learner(players, epoch_count=20, games_per_epoch=2000):
 if __name__ == "__main__":
 
     env = TicTacToe()
+    action_space = TicTacToeActionSpace()
 
     epoch_count = 400
     games_per_epoch = 2000
 
-    ps1 = SearchOneMoveAheadPlayer(env.action_space, strength=0.25)
-    ps2 = SearchOneMoveAheadPlayer(env.action_space, strength=0.50)
-    ps3 = SearchOneMoveAheadPlayer(env.action_space, strength=0.75)
-    ps4 = SearchOneMoveAheadPlayer(env.action_space, strength=1.00)
+    ps1 = SearchOneMoveAheadPlayer(action_space, strength=0.25)
+    ps2 = SearchOneMoveAheadPlayer(action_space, strength=0.50)
+    ps3 = SearchOneMoveAheadPlayer(action_space, strength=0.75)
+    ps4 = SearchOneMoveAheadPlayer(action_space, strength=1.00)
     pr = RandomPlayer()
     ph = HumanPlayer()
 
     eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=(epoch_count-50)*games_per_epoch,
                                                decrease_period=1000)
 
-    # q_function = QTableLookup(env.state_space, env.action_space, learning_rate=0.1)
-    q_function = QNeuralNetwork([20], env.state_space, env.action_space, learning_params={'LEARNING_RATE': 0.1})
-    q_learner = QLearningAgent(q_function, env.action_space, discount_factor=1.0,
+    # q_function = QTableLookup(env.state_space, action_space, learning_rate=0.1)
+    q_function = QNeuralNetwork([20], env.state_space, action_space, learning_params={'LEARNING_RATE': 0.1})
+    q_learner = QLearningAgent(q_function, action_space, discount_factor=1.0,
                                greed_eps=eps_schedule)
 
     r = pit_against_q_learner([pr, ps1, ps2, ps3, ps4], epoch_count=epoch_count, games_per_epoch=games_per_epoch)

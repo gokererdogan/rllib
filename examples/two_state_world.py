@@ -1,19 +1,21 @@
 import numpy as np
 
+from lasagne.updates import sgd
+
 from gmllib.helpers import progress_bar
 
 from rllib.environment import Environment
 from rllib.agent import Agent
-from rllib.space import DiscreteStateSpace, DiscreteActionSpace
+from rllib.space import FiniteActionSpace, FiniteStateSpace
 from rllib.parameter_schedule import GreedyEpsilonConstantSchedule, GreedyEpsilonLinearSchedule
 from rllib.q_learning import QLearningAgent, QTableLookup, QNeuralNetwork
 from rllib.rl import evaluate_policy_dp, evaluate_policy_monte_carlo, calculate_optimal_q_dp
-from rllib.policy_gradient import PolicyGradientAgent
+from rllib.policy_gradient import PolicyGradientAgent, PolicyNeuralNetworkMultinomial
 
 
-class TwoStateSpace(DiscreteStateSpace):
+class TwoStateSpace(FiniteStateSpace):
     def __init__(self):
-        DiscreteStateSpace.__init__(self, states=[0, 1])
+        FiniteStateSpace.__init__(self, states=[0, 1])
 
         self.rewards = [-0.2, 1.0]
 
@@ -35,14 +37,14 @@ class TwoStateInfiniteSpace(TwoStateSpace):
         return False
 
 
-class TwoStateActionSpace(DiscreteActionSpace):
+class TwoStateActionSpace(FiniteActionSpace):
     def __init__(self):
-        DiscreteActionSpace.__init__(self, actions=['L', 'R'])
+        FiniteActionSpace.__init__(self, actions=['L', 'R'])
 
 
 class TwoStateFiniteWorldEnvironment(Environment):
     def __init__(self):
-        Environment.__init__(self, state_space=TwoStateSpace(), action_space=TwoStateActionSpace())
+        Environment.__init__(self, state_space=TwoStateSpace())
 
     def _advance(self, action):
         if self.current_state == 0 and action == 'L':
@@ -65,6 +67,9 @@ class TwoStateWorldAgent(Agent):
     def __init__(self):
         Agent.__init__(self, action_space=TwoStateActionSpace())
 
+    def reset(self):
+        pass
+
     def perceive(self, state, reward, available_actions, reached_goal_state=False, episode_end=False):
         return np.random.choice(self.action_space)
 
@@ -74,8 +79,7 @@ class TwoStateWorldAgent(Agent):
 
 class TwoStateInfiniteWorldEnvironment(Environment):
     def __init__(self):
-        Environment.__init__(self, state_space=TwoStateInfiniteSpace(),
-                             action_space=TwoStateActionSpace())
+        Environment.__init__(self, state_space=TwoStateInfiniteSpace())
 
     def _advance(self, action):
         if self.current_state == 0 and action == 'L':
@@ -100,21 +104,22 @@ class TwoStateInfiniteWorldEnvironment(Environment):
 
 if __name__ == "__main__":
     eps_schedule = GreedyEpsilonConstantSchedule(eps=0.2)
+    action_space = TwoStateActionSpace()
 
     # finite case
     env = TwoStateFiniteWorldEnvironment()
     agent = TwoStateWorldAgent()
 
-    """
-    pg_learner = PolicyGradientAgent(env.state_space, agent.action_space, learning_rate=0.1, greed_eps=eps_schedule,
-                                     update_freq=100, optimizer='gd')
+    policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.01,
+                                                     optimizer=sgd)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=50)
 
     for i in range(10000):
         progress_bar(i+1, max=10000, update_freq=100)
         env.run(pg_learner, episode_length=np.inf)
 
-    print pg_learner.forward([1., 0.])
-    print pg_learner.forward([0., 1.])
+    print policy_function._forward(np.array([[1., 0.]]))
+    print policy_function._forward(np.array([[0., 1.]]))
     print
 
     # calculate q for a given policy
@@ -129,16 +134,15 @@ if __name__ == "__main__":
 
     # calculate the optimal value function
     # expected q: [[0.6, 0.8], [1.0, 1.0]]
-    q_opt_dp = calculate_optimal_q_dp(env, discount_factor=1.0, eps=1e-9)
+    q_opt_dp = calculate_optimal_q_dp(env, action_space, discount_factor=1.0, eps=1e-9)
     print q_opt_dp
     print
 
     # q-learning
     eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=5000, decrease_period=500)
     # q_function = QTableLookup(env.state_space, agent.action_space, learning_rate=0.1)
-    q_function = QNeuralNetwork([], env.state_space, agent.action_space, learning_params={'LEARNING_RATE': 0.01})
-    q_learner = QLearningAgent(q_function, agent.action_space, discount_factor=1.0,
-                               greed_eps=eps_schedule)
+    q_function = QNeuralNetwork([], env.state_space, agent.action_space, learning_rate=0.01)
+    q_learner = QLearningAgent(q_function, discount_factor=1.0, greed_eps=eps_schedule)
 
     for i in range(10000):
         env.run(q_learner, episode_length=200)
@@ -147,12 +151,9 @@ if __name__ == "__main__":
     print q_function.get_q(env.state_space[1])
     print
 
-    """
     # infinite case (discount factor has to be < 1.0)
     env = TwoStateInfiniteWorldEnvironment()
-    agent = TwoStateWorldAgent()
 
-    """
     # calculate q for a given policy
     # expected q: [[2.86, 3.94], [4.06, 5.14]]
     q_mc = evaluate_policy_monte_carlo(env, agent, episode_count=5000, episode_length=200, discount_factor=0.9)
@@ -165,16 +166,14 @@ if __name__ == "__main__":
 
     # calculate the optimal value function
     # expected q: [[7.72, 8.8], [8.92, 10.0]]
-    q_opt_dp = calculate_optimal_q_dp(env, discount_factor=0.9, eps=1e-9)
+    q_opt_dp = calculate_optimal_q_dp(env, action_space, discount_factor=0.9, eps=1e-9)
     print q_opt_dp
     print
-    """
 
     # q-learning
-    q_function = QNeuralNetwork([], env.state_space, agent.action_space, learning_params={'LEARNING_RATE': 0.01})
+    q_function = QNeuralNetwork([], env.state_space, agent.action_space, learning_rate=0.01)
     # q_function = QTableLookup(env.state_space, agent.action_space, learning_rate=0.1)
-    q_learner = QLearningAgent(q_function, agent.action_space, discount_factor=0.9,
-                               greed_eps=eps_schedule)
+    q_learner = QLearningAgent(q_function, discount_factor=0.9, greed_eps=eps_schedule)
 
     for i in range(2000):
         env.run(q_learner, episode_length=100)
@@ -182,19 +181,17 @@ if __name__ == "__main__":
     print q_function.get_q(env.state_space[1])
     print
 
-    """
     # policy gradient
-    # note that applying a reward baseline is important for learning in this case
-    pg_learner = PolicyGradientAgent(env.state_space, agent.action_space, learning_rate=0.1, greed_eps=eps_schedule,
-                                     update_freq=1, optimizer='gd', apply_baseline=True)
+    policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.001,
+                                                     optimizer=sgd)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=0.9, greed_eps=eps_schedule, update_freq=50)
 
-    for e in range(5):
-        for i in range(500):
-            env.run(pg_learner, episode_length=100)
+    for i in range(1000):
+        progress_bar(i+1, max=1000, update_freq=10)
+        # we need to keep the episodes short; because as the episodes get longer, the performance difference between
+        # policies become smaller (hence we don't converge to any solution, or converge to one random policy)
+        env.run(pg_learner, episode_length=10)
 
-        print pg_learner.forward([1., 0.])
-        print pg_learner.forward([0., 1.])
-        print pg_learner.grad_magnitudes[0][-1]
-        print pg_learner.grad_magnitudes[1][-1]
-        print
-    """
+    print policy_function._forward(np.array([[1., 0.]]))
+    print policy_function._forward(np.array([[0., 1.]]))
+    print
