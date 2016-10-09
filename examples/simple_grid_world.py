@@ -170,7 +170,7 @@ if __name__ == "__main__":
                                    nonlinearity=lasagne.nonlinearities.softmax)
     policy_function = PolicyNeuralNetworkMultinomial(nn, env.state_space, action_space, learning_rate=0.001,
                                                      optimizer=sgd)
-    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=1000)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, update_freq=1000)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
             progress_bar(i+1, max=episodes_per_epoch, update_freq=episodes_per_epoch/100)
