@@ -133,7 +133,8 @@ class QNeuralNetwork(QFunction):
             for i, n in enumerate(neural_network):
                 nn = lasagne.layers.DenseLayer(incoming=nn, num_units=n)
 
-            nn = lasagne.layers.DenseLayer(incoming=nn, num_units=self.action_count, nonlinearity=None)
+            nn = lasagne.layers.DenseLayer(incoming=nn, num_units=self.action_count,
+                                           nonlinearity=lasagne.nonlinearities.linear)
             self.nn = nn
         else:
             raise ValueError("neural network has to be either a list or lasagne.layers.Layer instance.")
@@ -215,6 +216,40 @@ class QLearningAgent(Agent):
         self.last_action = None
         self.last_reward = 0.0
 
+    def get_action(self, state, available_actions=None):
+        # if available actions is None, allow all actions in action space
+        if available_actions is None:
+            available_actions = self.action_space
+        if not self.learning_on or np.random.rand() > self.greed_eps.get_value(self):
+            # pick greedy action
+            available_action_ids = [self.action_space.index(a) for a in available_actions]
+            # mask unavailable actions
+            q_s = self.q.get_q(state, None)
+            mask_a = [i not in available_action_ids for i in range(len(q_s))]
+            q_ma = np.ma.masked_array(q_s, mask=mask_a)
+            # NOTE that if there are multiple actions with the same Q-value, we always pick the first one.
+            action = self.action_space[q_ma.argmax()]
+        else:
+            # pick random action
+            a_id = np.random.choice(len(available_actions))
+            action = available_actions[a_id]
+
+        return action
+
+    def get_action_probability(self, state, action=None):
+        action_probs = np.zeros(len(self.action_space))
+        if not self.learning_on:  # we always pick greedy if learning is off
+            eps = 0.0
+        else:
+            eps = self.greed_eps.get_value(self)
+        q_s = self.q.get_q(state)
+        action_probs[np.argmax(q_s)] = 1.0 - eps
+        action_probs += eps / len(self.action_space)
+        if action is None:
+            return action_probs
+        else:
+            return action_probs[self.action_space.index(action)]
+
     def perceive(self, state, reward, available_actions, reached_goal_state=False, episode_end=False):
         """
         Perceive and act. Uses Q-learning to update Q-values and picks the action using epsilon greedy policy.
@@ -244,18 +279,7 @@ class QLearningAgent(Agent):
         if reached_goal_state or episode_end:
             action = None
         else:
-            if not self.learning_on or np.random.rand() > self.greed_eps.get_value(self):
-                # pick greedy action
-                available_action_ids = [self.action_space.index(a) for a in available_actions]
-                # mask unavailable actions
-                q_s = self.q.get_q(state, None)
-                mask_a = [i not in available_action_ids for i in range(len(q_s))]
-                q_ma = np.ma.masked_array(q_s, mask=mask_a)
-                action = self.action_space[q_ma.argmax()]
-            else:
-                # pick random action
-                a_id = np.random.choice(len(available_actions))
-                action = available_actions[a_id]
+            action = self.get_action(state, available_actions)
 
         self.last_reward = reward
         self.last_state = state

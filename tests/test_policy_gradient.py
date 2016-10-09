@@ -84,6 +84,21 @@ class TestPolicyNeuralNetworkMultinomial(unittest.TestCase):
         a = self.pnn.get_action(1, available_actions=['L', 'R'])
         self.assertEqual(a, 'R')
 
+    def test_get_action_probability(self):
+        # test forward
+        self.pnn.nn.W.set_value(np.array([[0.1, 0.2], [0.3, 0.4]], dtype=theano.config.floatX))
+        self.pnn.nn.b.set_value(np.array([-0.1, 0.1], dtype=theano.config.floatX))
+        pl = np.exp(0.0) / (np.exp(0.0) + np.exp(0.3))
+        pr = np.exp(0.3) / (np.exp(0.0) + np.exp(0.3))
+        self.assertAlmostEqual(self.pnn.get_action_probability(0, 'L'), pl)
+        self.assertAlmostEqual(self.pnn.get_action_probability(0, 'R'), pr)
+        self.assertTrue(np.allclose(self.pnn.get_action_probability(0), [pl, pr]))
+        pl = np.exp(0.2) / (np.exp(0.2) + np.exp(0.5))
+        pr = np.exp(0.5) / (np.exp(0.2) + np.exp(0.5))
+        self.assertAlmostEqual(self.pnn.get_action_probability(1, 'L'), pl)
+        self.assertAlmostEqual(self.pnn.get_action_probability(1, 'R'), pr)
+        self.assertTrue(np.allclose(self.pnn.get_action_probability(1), [pl, pr]))
+
     def test_accumulate_reward(self):
         self.pnn.accumulate_reward(1.0)
         self.assertAlmostEqual(self.pnn.episode_reward.get_value(), 1.0)
@@ -287,6 +302,31 @@ class TestPolicyNeuralNetworkNormal(unittest.TestCase):
                                     np.zeros_like(self.pnn.params[1].get_value())))
 
     def test_get_action(self):
+        # test forward
+        self.pnn.nn.W.set_value(np.array([[0.1, 0.2]], dtype=theano.config.floatX))
+        self.pnn.nn.b.set_value(np.array([-0.1, 0.1], dtype=theano.config.floatX))
+        x = np.random.randn()
+        sx = np.array([x])
+        # cannot call with action = None
+        self.assertRaises(ValueError, self.pnn.get_action_probability, sx)
+        self.assertRaises(ValueError, self.pnn.get_action_probability, sx, None)
+        # check probability
+        m = 0.1*x-0.1
+        sd = np.exp(0.2*x+0.1)
+        v = sd**2
+        a = self.pnn.get_action(sx)
+        expected_p = 1. / (np.sqrt(2*np.pi) * sd) * np.exp(-(a-m)**2/(2*v))
+        self.assertAlmostEqual(self.pnn.get_action_probability(sx, a), expected_p)
+        x = np.random.randn()
+        sx = np.array([x])
+        m = 0.1*x-0.1
+        sd = np.exp(0.2*x+0.1)
+        v = sd**2
+        a = self.pnn.get_action(sx)
+        expected_p = 1. / (np.sqrt(2*np.pi) * sd) * np.exp(-(a-m)**2/(2*v))
+        self.assertAlmostEqual(self.pnn.get_action_probability(sx, a), expected_p)
+
+    def test_get_action_probability(self):
         # test forward
         self.pnn.nn.W.set_value(np.array([[0.1, 0.2]], dtype=theano.config.floatX))
         self.pnn.nn.b.set_value(np.array([-0.1, 0.1], dtype=theano.config.floatX))
@@ -543,13 +583,12 @@ class TestPolicyGradientAgent(unittest.TestCase):
         self.e_fin = TwoStateFiniteWorldEnvironment()
         self.e_inf = TwoStateInfiniteWorldEnvironment()
         self.a = TwoStateActionSpace()
-        self.eps = GreedyEpsilonConstantSchedule(0.2)
 
     def test_init(self):
         pf = PolicyNeuralNetworkMultinomial([], self.e_fin.state_space, self.a, learning_rate=0.1, optimizer=sgd)
-        self.assertRaises(ValueError, PolicyGradientAgent, pf, -0.1, self.eps, 5)
-        self.assertRaises(ValueError, PolicyGradientAgent, pf, 1.5, self.eps, 5)
-        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, greed_eps=self.eps, update_freq=5)
+        self.assertRaises(ValueError, PolicyGradientAgent, pf, -0.1, 5)
+        self.assertRaises(ValueError, PolicyGradientAgent, pf, 1.5, 5)
+        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, update_freq=5)
         self.assertEqual(pg_learner.discount_factor, 0.9)
         self.assertEqual(pg_learner.update_freq, 5)
         self.assertEqual(pg_learner.episodes_experienced, 0)
@@ -559,7 +598,7 @@ class TestPolicyGradientAgent(unittest.TestCase):
         pf = PolicyNeuralNetworkMultinomial([], self.e_fin.state_space, self.a, learning_rate=0.1, optimizer=sgd)
         pf.nn.W.set_value(np.zeros((2, 2), dtype=theano.config.floatX))
         pf.nn.b.set_value(np.zeros((2,), dtype=theano.config.floatX))
-        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, greed_eps=self.eps, update_freq=1)
+        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, update_freq=1)
 
         # test learning mode
         pg_learner.set_learning_mode(learning_on=False)
@@ -573,23 +612,6 @@ class TestPolicyGradientAgent(unittest.TestCase):
         self.assertIsNone(pg_learner.perceive(0, 0.0, ['L', 'R'], reached_goal_state=True))
         self.assertIsNone(pg_learner.perceive(0, 0.0, ['L', 'R'], episode_end=True))
         self.assertEqual(pg_learner.episodes_experienced, 0)
-
-        # force greedy action pick
-        pg_learner.set_learning_mode(learning_on=True)
-        pg_learner.greed_eps.eps = 0.0
-        pf.nn.W.set_value(np.array([[1000., 0.0], [0.0, 1000.]], dtype=theano.config.floatX))
-        action = pg_learner.perceive(0, -0.2, ['L', 'R'])
-        self.assertEqual(action, 'L')
-        self.assertEqual(pg_learner.trials_experienced, 1)
-        self.assertEqual(pg_learner.episodes_experienced, 0)
-        action = pg_learner.perceive(1, 1.0, ['L', 'R'])
-        self.assertEqual(action, 'R')
-        self.assertEqual(pg_learner.trials_experienced, 2)
-        self.assertEqual(pg_learner.episodes_experienced, 0)
-        action = pg_learner.perceive(1, 1.0, ['L', 'R'], reached_goal_state=True)
-        self.assertEqual(pg_learner.trials_experienced, 0)
-        self.assertEqual(pg_learner.episodes_experienced, 1)
-        pg_learner.greed_eps.eps = 0.2
 
         # test update frequency parameter
         pg_learner.set_learning_mode(learning_on=True)
@@ -649,7 +671,7 @@ class TestPolicyGradientAgent(unittest.TestCase):
     def test_policy_gradient(self):
         # test finite horizon
         pf = PolicyNeuralNetworkMultinomial([], self.e_fin.state_space, self.a, learning_rate=0.01, optimizer=sgd)
-        pg_learner = PolicyGradientAgent(pf, discount_factor=1.0, greed_eps=self.eps, update_freq=1)
+        pg_learner = PolicyGradientAgent(pf, discount_factor=1.0, update_freq=1)
         for i in range(10000):
             self.e_fin.run(pg_learner, episode_length=np.inf)
         prob_s1 = pf._forward([[1.0, 0.0]])[0]
@@ -659,7 +681,7 @@ class TestPolicyGradientAgent(unittest.TestCase):
 
         # test infinite horizon
         pf = PolicyNeuralNetworkMultinomial([], self.e_inf.state_space, self.a, learning_rate=0.01, optimizer=sgd)
-        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, greed_eps=self.eps, update_freq=1)
+        pg_learner = PolicyGradientAgent(pf, discount_factor=0.9, update_freq=1)
         for i in range(1000):
             # we need to keep the episodes short, because as the episodes get longer, the performance difference between
             # policies become smaller (hence we don't converge to any solution, or converge to one random policy)

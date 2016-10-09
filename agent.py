@@ -31,16 +31,33 @@ class Agent(object):
     def set_learning_mode(self, learning_on):
         self.learning_on = learning_on
 
-    def get_action_probabilities(self, state):
+    def get_action(self, state, available_actions=None):
+        """
+        Return an action for given state. This method is intended to be used in perceive method to get
+        action for current state.
+
+        Parameters:
+            state
+            available_actions (list): A list of available actions in state
+
+        Returns:
+            action
+        """
+        raise NotImplementedError()
+
+    def get_action_probability(self, state, action=None):
         """
         Returns action probabilities for state. This method is used by dynamic programming methods such as
-        :func:`rllib.rl.evaluate_policy_dp`.
+        :func:`rllib.rl.evaluate_policy_dp` and by MHEnvironment (environments with Metropolis-Hastings
+         dynamics).
 
         Parameters:
             state: State for which the action probabilities are requested.
+            action: Action for which the probability is requested. If None, probabilities for all actions
+            possible in state are returned.
 
         Returns:
-            list: A list of action probabilities
+            float or list: A float or list of action probability(ies)
         """
         pass
 

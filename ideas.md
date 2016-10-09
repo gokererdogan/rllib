@@ -26,3 +26,8 @@ need GameEnvironment.
     that.
 - GameEnvironment is not tested. Do it. Game examples should be tested
 too.
+- MHStateSpace expects hypothesis to have render method but the 
+Hypothesis class does not have a render method. I3DHypothesis has one
+but it is in another library. I should probably create a VisualHypothesis
+class in mcmclib OR let people subclass MHStateSpace and override
+to_vector method.

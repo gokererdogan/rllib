@@ -9,6 +9,7 @@ https://github.com/gokererdogan
 """
 
 import numpy as np
+import scipy.stats
 import theano
 import theano.tensor as T
 import lasagne
@@ -54,19 +55,33 @@ class PolicyFunction(object):
         self.state_space = state_space
         self.action_space = action_space
 
-    def get_action(self, state, available_actions, pick_greedy=False):
+    def get_action(self, state, available_actions=None):
         """
         Return action for state among available actions.
 
         Parameters:
             state
             available_actions (list)
-            pick_greedy (bool)
 
         Returns:
             action
         """
         raise NotImplementedError()
+
+    def get_action_probability(self, state, action=None):
+        """
+        Returns action probabilities for state. This method is used by MHEnvironment
+        (environments with Metropolis-Hastings dynamics) to calculate acceptance ratios.
+
+        Parameters:
+            state: State for which the action probabilities are requested.
+            action: Action for which the probability is requested. If None, probabilities for all actions
+            possible in state are returned.
+
+        Returns:
+            float or list: A float or list of action probability(ies)
+        """
+        pass
 
     def accumulate_reward(self, reward):
         """
@@ -183,7 +198,7 @@ class PolicyNeuralNetwork(PolicyFunction):
 
         self._update_params = theano.function([], None, updates=gradient_updates)
 
-    def get_action(self, state, available_actions, pick_greedy=False):
+    def get_action(self, state, available_actions=None):
         """
         Return action for state among available actions.
         Since this operation depends on which distribution we sample actions from, this method needs to be implemented
@@ -192,12 +207,26 @@ class PolicyNeuralNetwork(PolicyFunction):
         Parameters:
             state
             available_actions (list)
-            pick_greedy (bool)
 
         Returns:
             action
         """
         raise NotImplementedError()
+
+    def get_action_probability(self, state, action=None):
+        """
+        Returns action probabilities for state. This method is used by MHEnvironment
+        (environments with Metropolis-Hastings dynamics) to calculate acceptance ratios.
+
+        Parameters:
+            state: State for which the action probabilities are requested.
+            action: Action for which the probability is requested. If None, probabilities for all actions
+            possible in state are returned.
+
+        Returns:
+            float or list: A float or list of action probability(ies)
+        """
+        pass
 
     def accumulate_reward(self, reward):
         self._update_episode_reward(np.cast[theano.config.floatX](reward))
@@ -310,28 +339,45 @@ class PolicyNeuralNetworkMultinomial(PolicyNeuralNetwork):
                                        nonlinearity=lasagne.nonlinearities.softmax)
         return nn
 
-    def get_action(self, state, available_actions, pick_greedy=False):
+    def get_action(self, state, available_actions=None):
         """
         Return action for state among available actions.
 
         Parameters:
             state
             available_actions (list)
-            pick_greedy (bool)
 
         Returns:
             action
         """
-        if pick_greedy:
-            return np.random.choice(available_actions)
+        x = self.state_space.to_vector(state).astype(theano.config.floatX)
+        x = x[np.newaxis, :]
+        available_action_ids = [self.action_space.index(a) for a in available_actions]
+        probs = self._forward(x)[0]
+        available_probs = probs[available_action_ids] / np.sum(probs[available_action_ids])
+        a_id = np.random.choice(available_action_ids, p=available_probs)
+        return self.action_space[a_id]
+
+    def get_action_probability(self, state, action=None):
+        """
+        Returns action probabilities for state. This method is used by MHEnvironment
+        (environments with Metropolis-Hastings dynamics) to calculate acceptance ratios.
+
+        Parameters:
+            state: State for which the action probabilities are requested.
+            action: Action for which the probability is requested. If None, probabilities for all actions
+            possible in state are returned.
+
+        Returns:
+            float or list: A float or list of action probability(ies)
+        """
+        x = self.state_space.to_vector(state).astype(theano.config.floatX)
+        x = x[np.newaxis, :]
+        probs = self._forward(x)[0]
+        if action is None:
+            return probs
         else:
-            x = self.state_space.to_vector(state).astype(theano.config.floatX)
-            x = x[np.newaxis, :]
-            available_action_ids = [self.action_space.index(a) for a in available_actions]
-            probs = self._forward(x)[0]
-            available_probs = probs[available_action_ids] / np.sum(probs[available_action_ids])
-            a_id = np.random.choice(available_action_ids, p=available_probs)
-            return self.action_space[a_id]
+            return probs[self.action_space.index(action)]
 
     def accumulate_gradients(self, state, action):
         """
@@ -354,7 +400,8 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
     distribution, from which an action is picked. This class is used for implementing policies for real-valued action
     spaces.
     """
-    def __init__(self, neural_network, state_space, action_space, learning_rate, optimizer, cov_type="identity"):
+    def __init__(self, neural_network, state_space, action_space, learning_rate, optimizer, cov_type="identity",
+                 std_dev=1.0):
         """
         Parameters:
             neural_network (list or lasagne.layers.Layer): Either a list containing the number of hidden units
@@ -369,9 +416,12 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
             learning_rate (float): Learning rate
             optimizer (lasagne.updates method)
             cov_type (string): identity or diagonal.
+            std_dev (float): Standard deviation for identity covariance matrix, i.e., sigma = std_dev*I
         """
         if cov_type not in ['identity', 'diagonal']:
             raise ValueError("Covariance type should be identity or diagonal.")
+        if cov_type == 'identity':
+            self.std_dev = std_dev
         self.cov_type = cov_type
 
         self.action_dim = int(np.prod(action_space.shape()))
@@ -379,10 +429,10 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
         # are we given a lasagne neural network?
         if isinstance(neural_network, lasagne.layers.Layer):
             # check the number of output units. we need one set of outputs for mean and another set for std. deviations.
-            if cov_type == 'diagonal' and neural_network.output_shape[1:] != 2 * self.action_dim:
+            if cov_type == 'diagonal' and neural_network.output_shape[1] != 2 * self.action_dim:
                 raise ValueError("Neural network should have one mean output unit and one variance output unit for "
                                  "each action dimension.")
-            elif cov_type == 'identity' and neural_network.output_shape[1:] != self.action_dim:
+            elif cov_type == 'identity' and neural_network.output_shape[1] != self.action_dim:
                 raise ValueError("Neural network should have one mean output unit for "
                                  "each action dimension.")
         elif isinstance(neural_network, list):  # are we given a list of hidden unit counts
@@ -407,7 +457,7 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
             w[:, self.action_dim:] = 0.0
             neural_network.W.set_value(w)
         else:  # identity
-            self.log_p = T.sum(-0.5 * T.square((self.selected_action - output_mean)))
+            self.log_p = T.sum(-0.5 * T.square((self.selected_action - output_mean) / self.std_dev))
 
         # NOTE --------
         # call super's init. NOTE that we call it at the end because super's init needs the variables we set above.
@@ -438,17 +488,15 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
                                        nonlinearity=lasagne.nonlinearities.linear)
         return nn
 
-    def get_action(self, state, available_actions, pick_greedy=False):
+    def get_action(self, state, available_actions=None):
         """
-        Return action for state by sampling from a diagonal normal distribution. Mean and variance of this distribution
-        is calculated using the neural network. If a greedy action is requested, we sample from a zero mean normal with
-        double standard deviation.
+        Return action for state by sampling from a normal distribution. Mean and variance of this distribution
+        is calculated using the neural network.
         Note that available actions are ignored.
 
         Parameters:
             state
             available_actions (list)
-            pick_greedy (bool)
 
         Returns:
             action
@@ -457,15 +505,40 @@ class PolicyNeuralNetworkNormal(PolicyNeuralNetwork):
         x = x[np.newaxis, :]
         output = self._forward(x)[0]
         mean = output[0:self.action_dim]
+
         if self.cov_type == 'diagonal':
-            log_std = output[self.action_dim:]
+            std = np.exp(output[self.action_dim:])
         else:
-            log_std = 0.0
-        if pick_greedy:
-            action = mean + np.exp(log_std) * np.random.randn(self.action_dim) * 2.0
-        else:
-            action = mean + (np.exp(log_std) * np.random.randn(self.action_dim))
+            std = self.std_dev
+
+        action = mean + std * np.random.randn(self.action_dim)
         return action
+
+    def get_action_probability(self, state, action=None):
+        """
+        Returns action probabilities for state. This method is used by MHEnvironment
+        (environments with Metropolis-Hastings dynamics) to calculate acceptance ratios.
+
+        Parameters:
+            state: State for which the action probabilities are requested.
+            action: Action for which the probability is requested. Note that action cannot be None because we cannot
+            return the probabilities for all actions (which are infinitely many)
+
+        Returns:
+            float: Action probability
+        """
+        if action is None:
+            raise ValueError("Action cannot be None for a Gaussian action distribution.")
+        x = self.state_space.to_vector(state).astype(theano.config.floatX)
+        x = x[np.newaxis, :]
+        output = self._forward(x)[0]
+        mean = output[0:self.action_dim]
+        if self.cov_type == 'diagonal':
+            std = np.exp(output[self.action_dim:])
+        else:
+            std = self.std_dev
+
+        return scipy.stats.multivariate_normal.pdf(action, mean, np.square(std))
 
     def accumulate_gradients(self, state, action):
         """
@@ -485,13 +558,11 @@ class PolicyGradientAgent(Agent):
     """
     PolicyGradientAgent class. This class implements an agent that uses policy gradient method to learn policies.
     """
-    def __init__(self, policy_function, discount_factor, greed_eps, update_freq=1):
+    def __init__(self, policy_function, discount_factor, update_freq=1):
         """
         Parameters:
             policy_function (PolicyFunction): Policy function instance implementing the mapping from states to actions.
             discount_factor (float): Reward discount factor
-            greed_eps (ParameterSchedule): Schedule for epsilon of epsilon-greedy action picking strategy (probability
-                of picking a random (rather than the greedy) action.
             update_freq (int): Update frequency. Parameters are updated after every update_freq episodes
         """
         Agent.__init__(self, action_space=policy_function.action_space)
@@ -505,12 +576,19 @@ class PolicyGradientAgent(Agent):
         self.update_freq = update_freq
 
         self.policy_function = policy_function
-        self.greed_eps = greed_eps
         self.trials_experienced = 0  # used for discounting reward
         self.episodes_experienced = 0  # used for updating parameters at the desired update_freq
 
     def reset(self):
         pass
+
+    def get_action(self, state, available_actions=None):
+        action = self.policy_function.get_action(state, available_actions)
+        return action
+
+    def get_action_probability(self, state, action=None):
+        probs = self.policy_function.get_action_probability(state, action)
+        return probs
 
     def perceive(self, state, reward, available_actions, reached_goal_state=False, episode_end=False):
         """
@@ -544,8 +622,7 @@ class PolicyGradientAgent(Agent):
             return None
 
         # act
-        pick_greedy = self.learning_on and (np.random.rand() < self.greed_eps.get_value(self))
-        action = self.policy_function.get_action(state, available_actions, pick_greedy)
+        action = self.get_action(state, available_actions)
 
         if self.learning_on:
             # accumulate gradients

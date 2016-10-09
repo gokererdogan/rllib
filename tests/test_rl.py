@@ -33,7 +33,7 @@ class TestRL(unittest.TestCase):
         self.assertLess(np.sum(np.abs(q - expected_q)), TOL, msg="{0:s}\n{1:s}".format(q, expected_q))
 
         e = TwoStateInfiniteWorldEnvironment()
-        q = evaluate_policy_monte_carlo(e, a, episode_count=1000, episode_length=200, discount_factor=0.9)
+        q = evaluate_policy_monte_carlo(e, a, episode_count=5000, episode_length=200, discount_factor=0.9)
         # expected q: [[2.86, 3.94], [4.06, 5.14]]
         expected_q = np.array([[2.86, 3.94], [4.06, 5.14]])
         self.assertLess(np.sum(np.abs(q - expected_q)), TOL, msg="{0:s}\n{1:s}".format(q, expected_q))

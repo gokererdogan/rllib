@@ -87,6 +87,56 @@ class RealStateSpace(object):
         return state
 
 
+class MHStateSpace(StateSpace):
+    """
+    Metropolis-Hastings (MH) state space base class. This class is specifically designed for MHEnvironment, which treats
+    a MH sampler as a reinforcement learning environment.
+    """
+    def __init__(self, hypothesis_class, data, reward_type, **hypothesis_params):
+        """
+        Parameters:
+            hypothesis_class (mcmclib.Hypothesis)
+            data (numpy.ndarray)
+            reward_type (string): Type of reward. Can be one of log_p, acceptance, log_p_increase
+            hypothesis_params: Parameters passed to hypothesis_classs constructor.
+        """
+        StateSpace.__init__(self)
+        self.hypothesis_class = hypothesis_class
+        self.hypothesis_params = hypothesis_params
+        self.data = data
+        self.reward_type = reward_type
+
+    def get_initial_state(self):
+        h = self.hypothesis_class(**self.hypothesis_params)
+        # state consists of (current hypothesis, whether hypothesis was accepted/rejected, increase in log prob.)
+        state = {'hypothesis': h, 'is_accepted': True, 'log_p_increase': 0.0}
+        return state
+
+    def get_reward(self, state):
+        if self.reward_type == 'acceptance':
+            return int(state['is_accepted'])
+        elif self.reward_type == 'log_p_increase':
+            return state['log_p_increase']
+        elif self.reward_type == 'log_p':
+            h = state['hypothesis']
+            return h.log_prior() + h.log_likelihood(self.data)
+        else:
+            raise ValueError("Unknown reward type.")
+
+    def is_goal_state(self, state):
+        return False
+
+    def to_string(self, state):
+        return str(state)
+
+    def to_vector(self, state):
+        # vector representation of the state is the difference image, i.e., (prediction - observed)
+        h = state['hypothesis']
+        image = h.render()
+        x = (image - self.data)
+        return x
+
+
 class FiniteStateSpace(StateSpace):
     """
     FiniteStateSpace class. This class implements a generic finite state space that can be constructed simply
@@ -169,6 +219,13 @@ class ActionSpace(object):
     ActionSpace base class. This abstract class specifies the interface expected from action space classes.
     """
     def __init__(self):
+        pass
+
+    def reverse(self, action):
+        """
+        Get the reverse of action. This is used for calculating the probability of the
+        reverse move for Metropolis-Hastings.
+        """
         pass
 
     def to_string(self, action):

@@ -14,7 +14,6 @@ from gmllib.helpers import progress_bar
 
 from rllib.environment import Environment
 from rllib.space import RealStateSpace, RealActionSpace
-from rllib.parameter_schedule import GreedyEpsilonConstantSchedule
 from rllib.policy_gradient import PolicyGradientAgent, PolicyNeuralNetworkNormal
 
 
@@ -59,13 +58,12 @@ class SimpleInfiniteWorldEnvironment(Environment):
 if __name__ == "__main__":
     env = SimpleInfiniteWorldEnvironment()
     action_space = SimpleInfiniteWorldActionSpace()
-    eps = GreedyEpsilonConstantSchedule(eps=0.0)
 
     policy_function = PolicyNeuralNetworkNormal([], env.state_space, action_space, learning_rate=1e-3, optimizer=sgd,
                                                 cov_type='identity')
-    pg_learner = PolicyGradientAgent(policy_function, discount_factor=0.9, greed_eps=eps, update_freq=1000)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=0.9, update_freq=1000)
 
-    epoch_count = 100
+    epoch_count = 20
     episodes_per_epoch = 5000
     episode_length = 10
     for e in range(epoch_count):
@@ -80,6 +78,12 @@ if __name__ == "__main__":
     print "Network parameters:"
     print policy_function.nn.W.get_value()
     print policy_function.nn.b.get_value()
+
+    print "Test learned policy"
+    action = pg_learner.get_action(np.array([-2.0]))
+    print action
+    action = pg_learner.get_action(np.array([-2.0]))
+    print action
 
     """
     # test gradients

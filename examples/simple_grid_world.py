@@ -1,5 +1,8 @@
 import numpy as np
+import lasagne
 from lasagne.updates import sgd
+
+from gmllib.helpers import progress_bar
 
 from rllib.environment import Environment
 from rllib.agent import Agent
@@ -118,8 +121,11 @@ class SimpleGridWorldAgent(Agent):
     def reset(self):
         pass
 
-    def perceive(self, new_state, reward, available_actions, reached_goal_state=False, episode_end=False):
+    def get_action(self, state, available_actions=None):
         return np.random.choice(self.action_space)
+
+    def perceive(self, new_state, reward, available_actions, reached_goal_state=False, episode_end=False):
+        return self.get_action(new_state)
 
 
 if __name__ == "__main__":
@@ -129,18 +135,19 @@ if __name__ == "__main__":
     q_opt = calculate_optimal_q_dp(env, action_space, discount_factor=1.0, eps=1e-9)
     print q_opt
 
-    epoch_count = 50
-    episodes_per_epoch = 2000
+    epoch_count = 20
+    episodes_per_epoch = 5000
     eps_schedule = GreedyEpsilonLinearSchedule(start_eps=1.0, end_eps=0.1, no_episodes=epoch_count*episodes_per_epoch,
                                                decrease_period=episodes_per_epoch)
     rewards = np.zeros(epoch_count)
 
-    """
+    # q-learning
     # q_function = QTableLookup(env.state_space, action_space, learning_rate=0.05)
     q_function = QNeuralNetwork([], env.state_space, action_space, learning_rate=0.01)
     q_learner = QLearningAgent(q_function, discount_factor=1.0, greed_eps=eps_schedule)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
+            progress_bar(i+1, max=episodes_per_epoch, update_freq=episodes_per_epoch/100)
             s, a, r = env.run(q_learner, np.inf)
             rewards[e] += np.sum(r)
         rewards[e] /= episodes_per_epoch
@@ -156,12 +163,17 @@ if __name__ == "__main__":
     for state in env.state_space:
         print q_function.get_q(state)
 
-    """
-    policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.01,
+    # policy gradient
+    input_dim = env.state_space.to_vector(env.state_space.get_initial_state()).shape
+    nn = lasagne.layers.InputLayer(shape=(1,) + input_dim)
+    nn = lasagne.layers.DenseLayer(incoming=nn, num_units=len(action_space), W=lasagne.init.Normal(0.01), b=None,
+                                   nonlinearity=lasagne.nonlinearities.softmax)
+    policy_function = PolicyNeuralNetworkMultinomial(nn, env.state_space, action_space, learning_rate=0.001,
                                                      optimizer=sgd)
-    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=400)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=1000)
     for e in range(epoch_count):
         for i in range(episodes_per_epoch):
+            progress_bar(i+1, max=episodes_per_epoch, update_freq=episodes_per_epoch/100)
             s, a, r = env.run(pg_learner, np.inf)
             rewards[e] += np.sum(r)
         rewards[e] /= episodes_per_epoch

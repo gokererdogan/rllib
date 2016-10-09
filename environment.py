@@ -17,6 +17,7 @@ class Environment(object):
     """
     Environment base class. This class implements an environment for an agent to run in.
     :func:`rllib.environment.Environment.run` executes one episode running the given agent in the environment.
+    Subclasses should implement the _advance method to implement the environment dynamics.
     """
     def __init__(self, state_space):
         """
@@ -27,6 +28,8 @@ class Environment(object):
 
         self.current_state = None
         self.current_reward = None
+
+        self.active_agent = None
 
     def reset(self):
         self.current_state = self.state_space.get_initial_state()
@@ -65,7 +68,7 @@ class Environment(object):
             action: Action taken in current state
 
         Returns:
-            -: new state
+            new state
         """
         raise NotImplementedError()
 
@@ -83,6 +86,7 @@ class Environment(object):
             numpy.ndarray: List of actions
             numpy.ndarray: List of rewards
         """
+        self.active_agent = agent
         self.reset()
         agent.reset()
 
@@ -101,6 +105,17 @@ class Environment(object):
 
         e = 0
         while True:
+            if e >= episode_length or self.state_space.is_goal_state(self.current_state):
+                # let the agent perceive one last time.
+                # note that we append None as its action because the agent does not act in the terminal state
+                _ = agent.perceive(self.current_state, self.current_reward, self.get_available_actions(agent),
+                                   reached_goal_state=self.state_space.is_goal_state(self.current_state),
+                                   episode_end=(e >= episode_length))
+                states.append(self.current_state)
+                rewards.append(self.current_reward)
+                actions.append(None)
+                break
+
             # get action from agent
             action = agent.perceive(self.current_state, self.current_reward, self.get_available_actions(agent),
                                     reached_goal_state=self.state_space.is_goal_state(self.current_state),
@@ -117,18 +132,115 @@ class Environment(object):
                 print self.state_space.to_string(self.current_state)
 
             e += 1
-            if e >= episode_length or self.state_space.is_goal_state(self.current_state):
-                # let the agent perceive one last time.
-                # note that we append None as its action because the agent does not act in the terminal state
-                _ = agent.perceive(self.current_state, self.current_reward, self.get_available_actions(agent),
-                                   reached_goal_state=self.state_space.is_goal_state(self.current_state),
-                                   episode_end=(e >= episode_length))
-                states.append(self.current_state)
-                rewards.append(self.current_reward)
-                actions.append(None)
-                break
 
+        self.active_agent = None
         return np.array(states), np.array(actions), np.array(rewards)
+
+
+class MHEnvironment(Environment):
+    """
+    MHEnvironment base class. This class implements an environment where state transitions are governed by probabilistic
+    dynamics according to Metropolis-Hastings method.
+    Subclasses need to override the _apply_action_to_hypothesis method which applies a given action to a hypothesis and
+    returns a new hypothesis.
+
+    MHEnvironment enables extra information to be appended to state. State is implemented as a dictionary where
+    state['hypothesis'] contains the hypothesis. One can add other keys to this state to hold extra information such
+    as whether the hypothesis was accepted/rejected, or increase in log probability from the last hypothesis to the
+    current one. These are useful for defining different types of rewards. These two are in fact added to the state
+    by MHEnvironment. Method _augment_state provides the means for adding information to state dictionary. This method
+    is called before _advance returns and can be overridden to add more information to state.
+
+    Note that MHEnvironment requires the following methods be available
+        - get_action_probability in Agent class (needed to calculate acceptance ratio)
+        - reverse in ActionSpace class (again, needed to calculate the probability of reverse move which is required to
+            calculate acceptance ratio)
+    """
+    def __init__(self, state_space):
+        """
+        Parameters:
+            state_space (MHStateSpace): Note that state_space needs to be an instance of MHStateSpace (not simply
+                StateSpace) since MHStateSpace has custom functionality implemented for MHEnvironment.
+        """
+        Environment.__init__(self, state_space)
+
+    def _apply_action_to_hypothesis(self, hypothesis, action):
+        """
+        Apply action to hypothesis and return a new hypothesis. This method needs to be overridden in subclasses.
+        _advance method calls this method to produce a new hypothesis from the current one and the selected action.
+
+        Parameters:
+            hypothesis (mcmclib.Hypothesis): Hypothesis to apply action to
+            action: Action to apply to hypothesis
+
+        Returns
+            mcmclib.Hypothesis: new hypothesis
+        """
+        raise NotImplementedError()
+
+    def _augment_state(self, state):
+        """
+        Augment state with extra information. This method is called right before _advance returns. One can add new
+        information to the state by adding these to the state dictionary.
+
+        Parameters:
+            state (dict)
+
+        Returns:
+            state (dict)
+        """
+        return state
+
+    def _advance(self, action):
+        """
+        Take action in current state and advance to next state. This method implements the dynamics (state transitions)
+        of the Metropolis-Hastings environment.
+
+        Parameters:
+            action: Action taken in current state
+
+        Returns:
+            new state
+        """
+        # state consists of current hypothesis, whether the hypothesis was accepted/rejected, increase in log prob. from
+        # previous state to current
+        current_h = self.current_state['hypothesis']
+        new_h = self._apply_action_to_hypothesis(current_h, action)
+
+        p_sp_s = self.active_agent.get_action_probability(self.current_state, action)
+        reverse_action = self.active_agent.action_space.reverse(action)
+        new_state = {'hypothesis': new_h}
+        p_s_sp = self.active_agent.get_action_probability(new_state, reverse_action)
+
+        # MH step
+        log_p_s = current_h.log_prior() + current_h.log_likelihood(self.state_space.data)
+        log_p_sp = new_h.log_prior() + new_h.log_likelihood(self.state_space.data)
+
+        # calculate acceptance ratio
+        # a(h -> hp)
+        log_a_sp_s = log_p_sp + np.log(p_s_sp) - (log_p_s + np.log(p_sp_s))
+
+        # accept/reject
+        if np.log(np.random.rand()) < log_a_sp_s:
+            is_accepted = True
+            log_p_inc = log_p_sp - log_p_s
+        else:
+            new_h = current_h
+            is_accepted = False
+            log_p_inc = 0.0
+
+        state = {'hypothesis': new_h, 'is_accepted': is_accepted, 'log_p_increase': log_p_inc}
+        state = self._augment_state(state)
+        return state
+
+    def set_observed_data(self, data):
+        """
+        Set observed data of state space.
+
+        Parameters:
+            data (numpy.ndarray)
+        """
+        self.state_space.data = data
 
 
 class GameEnvironment(Environment):

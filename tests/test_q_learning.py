@@ -12,6 +12,7 @@ import unittest
 
 from rllib.examples.two_state_world import TwoStateFiniteWorldEnvironment, TwoStateInfiniteWorldEnvironment, \
     TwoStateActionSpace
+from rllib.examples.two_state_mh_world import TwoStateMHActionSpace, TwoStateMHStateSpace, TwoStateMHEnvironment
 from rllib.parameter_schedule import GreedyEpsilonConstantSchedule
 from rllib.q_learning import QTableLookup, QNeuralNetwork, QLearningAgent
 
@@ -140,6 +141,75 @@ class TestQLearningAgent(unittest.TestCase):
         self.assertIsNone(q_learner.last_action)
         self.assertEqual(q_learner.last_reward, 0.0)
 
+    def test_get_action(self):
+        qf = QTableLookup(self.e_fin.state_space, self.a, learning_rate=0.01)
+        q_learner = QLearningAgent(qf, discount_factor=1.0, greed_eps=self.eps)
+
+        # pick greedy
+        # if learning is off, greedy action is picked
+        q_learner.set_learning_mode(learning_on=False)
+        qf.q_table = np.array([[0.0, 1.0], [0.5, 0.0]])
+        self.assertEqual(q_learner.get_action(state=0), 'R')
+        self.assertEqual(q_learner.get_action(state=1), 'L')
+        # set learning on, but set eps to 0.0
+        q_learner.set_learning_mode(learning_on=True)
+        self.eps.eps = 0.0
+        self.assertEqual(q_learner.get_action(state=0), 'R')
+        self.assertEqual(q_learner.get_action(state=1), 'L')
+        # test available actions
+        self.assertEqual(q_learner.get_action(state=0, available_actions=['L', 'R']), 'R')
+        self.assertEqual(q_learner.get_action(state=0, available_actions=['L']), 'L')
+        self.assertEqual(q_learner.get_action(state=1, available_actions=['L', 'R']), 'L')
+        self.assertEqual(q_learner.get_action(state=1, available_actions=['R']), 'R')
+
+        # pick random
+        self.eps.eps = 1.0
+        self.assertIn(q_learner.get_action(state=0), ['L', 'R'])
+        self.assertIn(q_learner.get_action(state=1), ['L', 'R'])
+        # test available actions
+        self.assertIn(q_learner.get_action(state=0, available_actions=['L', 'R']), ['L', 'R'])
+        self.assertEqual(q_learner.get_action(state=0, available_actions=['L']), 'L')
+        self.assertIn(q_learner.get_action(state=1, available_actions=['L', 'R']), ['L', 'R'])
+        self.assertEqual(q_learner.get_action(state=1, available_actions=['R']), 'R')
+
+    @unittest.skipIf('--skipslow' in sys.argv, "Slow tests are turned off.")
+    def test_get_action_freq(self):
+        qf = QTableLookup(self.e_fin.state_space, self.a, learning_rate=0.01)
+        q_learner = QLearningAgent(qf, discount_factor=1.0, greed_eps=self.eps)
+        # check if we pick each action with the right frequency
+        self.eps.eps = 0.4
+        actions = np.array([q_learner.get_action(0) for _ in range(100000)])
+        pl = np.mean(actions == 'L')
+        pr = np.mean(actions == 'R')
+        # we expect to see L 20%, R 80% of the time
+        self.assertAlmostEqual(pl, 0.2, places=2)
+        self.assertAlmostEqual(pr, 0.8, places=2)
+
+    def test_get_action_probability(self):
+        qf = QTableLookup(self.e_fin.state_space, self.a, learning_rate=0.01)
+        q_learner = QLearningAgent(qf, discount_factor=1.0, greed_eps=self.eps)
+
+        # pick greedy
+        # if learning is off, greedy action is picked
+        q_learner.set_learning_mode(learning_on=False)
+        qf.q_table = np.array([[0.0, 1.0], [0.5, 0.0]])
+        self.assertListEqual(list(q_learner.get_action_probability(0)), [0.0, 1.0])
+        self.assertListEqual(list(q_learner.get_action_probability(1)), [1.0, 0.0])
+        self.assertEqual(q_learner.get_action_probability(0, 'L'), 0.0)
+        self.assertEqual(q_learner.get_action_probability(0, 'R'), 1.0)
+        self.assertEqual(q_learner.get_action_probability(1, 'L'), 1.0)
+        self.assertEqual(q_learner.get_action_probability(1, 'R'), 0.0)
+
+        # set learning on
+        q_learner.set_learning_mode(learning_on=True)
+        self.eps.eps = 0.3
+        self.assertListEqual(list(q_learner.get_action_probability(0)), [0.15, 0.85])
+        self.assertListEqual(list(q_learner.get_action_probability(1)), [0.85, 0.15])
+        self.assertEqual(q_learner.get_action_probability(0, 'L'), 0.15)
+        self.assertEqual(q_learner.get_action_probability(0, 'R'), 0.85)
+        self.assertEqual(q_learner.get_action_probability(1, 'L'), 0.85)
+        self.assertEqual(q_learner.get_action_probability(1, 'R'), 0.15)
+
     def test_perceive(self):
         qf = QTableLookup(self.e_fin.state_space, self.a, learning_rate=0.1)
         qf.q_table = np.zeros((2, 2))
@@ -261,4 +331,49 @@ class TestQLearningAgent(unittest.TestCase):
         self.run_q_learning_1(qf)
         qf = QNeuralNetwork([], self.e_inf.state_space, self.a, learning_rate=0.01)
         self.run_q_learning_2(qf)
+
+    @unittest.skipIf('--skipslow' in sys.argv, "Slow tests are turned off.")
+    def test_q_learning_with_mh_environment(self):
+        ssp = TwoStateMHStateSpace(reward_type='log_p')
+        asp = TwoStateMHActionSpace()
+        env = TwoStateMHEnvironment(ssp)
+
+        qf = QTableLookup(ssp, asp, learning_rate=0.05)
+
+        eps = 0.8
+        es = GreedyEpsilonConstantSchedule(eps=eps)
+        qa = QLearningAgent(qf, discount_factor=0.9, greed_eps=es)
+
+        s, a, r = env.run(qa, episode_length=50000)
+        # expected q are calculated using sympy with the following code
+        """
+        import sympy
+        q1l, q1r, q2l, q2r, p1, p2, g, eps, a = sympy.symbols('q1l q1r q2l q2r p1 p2 g eps a')
+        soln = sympy.linsolve([a - (p2*eps)/(2*p1*(1-eps+(eps/2))), q1l - sympy.log(p1) - g*q1r,
+                               q1r - sympy.log(p1) - g*sympy.Min(a,1.0)*q2r - g*(1-sympy.Min(a,1.0))*q1r,
+                               q2l - sympy.log(p2) - g*(sympy.Min(1/a, 1.0))*q1r - g*(1-sympy.Min(1/a, 1.0))*q2r,
+                               q2r - sympy.log(p2) - g*q2r], (a, q1l, q1r, q2l, q2r))
+        s = soln.subs([(p1, 0.4), (p2, 0.6), (eps, 0.8), (g, 0.9)])
+        s.subs([(a, s.args[0][0])]).args[0][1:]
+        """
+        expected_q = np.array([[-5.87863994306542, -5.51372134576807], [-5.47317483495725, -5.10825623765991]])
+        self.assertTrue(np.allclose(qf.q_table[1:], expected_q, atol=TOL), msg="{0:s}\n{1:s}".format(qf.q_table[1:],
+                                                                                                      expected_q))
+
+        # try with different eps
+        eps = 1.0
+        es.eps = eps
+        s, a, r = env.run(qa, episode_length=50000)
+        expected_q = np.array([[-5.87863994306542, -5.51372134576807], [-5.35153530252481, -5.10825623765991]])
+        self.assertTrue(np.allclose(qf.q_table[1:], expected_q, atol=TOL), msg="{0:s}\n{1:s}".format(qf.q_table[1:],
+                                                                                                      expected_q))
+
+        eps = 0.4
+        es.eps = eps
+        # this value of eps seems to require more time to converge
+        qf.learning_rate = 0.01
+        s, a, r = env.run(qa, episode_length=100000)
+        expected_q = np.array([[-6.34782099673344, -6.03503362762143], [-5.94235588862527, -5.10825623765991]])
+        self.assertTrue(np.allclose(qf.q_table[1:], expected_q, atol=TOL), msg="{0:s}\n{1:s}".format(qf.q_table[1:],
+                                                                                                      expected_q))
 

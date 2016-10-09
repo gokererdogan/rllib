@@ -70,10 +70,13 @@ class TwoStateWorldAgent(Agent):
     def reset(self):
         pass
 
-    def perceive(self, state, reward, available_actions, reached_goal_state=False, episode_end=False):
+    def get_action(self, state, available_actions=None):
         return np.random.choice(self.action_space)
 
-    def get_action_probabilities(self, state):
+    def perceive(self, state, reward, available_actions, reached_goal_state=False, episode_end=False):
+        return self.get_action(state)
+
+    def get_action_probability(self, state, action=None):
         return np.array([0.5, 0.5])
 
 
@@ -112,7 +115,7 @@ if __name__ == "__main__":
 
     policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.01,
                                                      optimizer=sgd)
-    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, greed_eps=eps_schedule, update_freq=50)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=1.0, update_freq=50)
 
     for i in range(10000):
         progress_bar(i+1, max=10000, update_freq=100)
@@ -176,6 +179,7 @@ if __name__ == "__main__":
     q_learner = QLearningAgent(q_function, discount_factor=0.9, greed_eps=eps_schedule)
 
     for i in range(2000):
+        progress_bar(i+1, max=2000, update_freq=20)
         env.run(q_learner, episode_length=100)
     print q_function.get_q(env.state_space[0])
     print q_function.get_q(env.state_space[1])
@@ -184,7 +188,7 @@ if __name__ == "__main__":
     # policy gradient
     policy_function = PolicyNeuralNetworkMultinomial([], env.state_space, action_space, learning_rate=0.001,
                                                      optimizer=sgd)
-    pg_learner = PolicyGradientAgent(policy_function, discount_factor=0.9, greed_eps=eps_schedule, update_freq=50)
+    pg_learner = PolicyGradientAgent(policy_function, discount_factor=0.9, update_freq=50)
 
     for i in range(1000):
         progress_bar(i+1, max=1000, update_freq=10)

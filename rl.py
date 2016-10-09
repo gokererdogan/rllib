@@ -109,7 +109,7 @@ def evaluate_policy_dp(environment, agent, discount_factor, eps=1e-6):
                     sp_id = environment.state_space.index(sp)
 
                     # get action probabilities
-                    p_a = agent.get_action_probabilities(sp)
+                    p_a = agent.get_action_probability(sp)
                     q_sa += np.sum(prob_sp * discount_factor * q[sp_id, :] * p_a)
 
                 tot_change += (q_sa - q[state_id, action_id])**2
